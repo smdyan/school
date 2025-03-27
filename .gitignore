@@ -1,0 +1,12 @@
+### user data ###
+.DS_Store
+.env
+database/
+
+### VUE ###
+node_modules/
+public/
+dist/
+
+### VS Code ###
+.vscode/
