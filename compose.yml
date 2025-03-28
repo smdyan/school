@@ -2,26 +2,23 @@ name: school
 services:
 
   api:
-    container_name: fastapi
+    container_name: school
 
     build:
       context: ./fastapi
       dockerfile: Dockerfile_fastapi
 
     volumes:
-      - ./database:/fastapi/db
-
-    ports:
-      - 8081:8081 
+      - ./database:/fastapi/db 
    
-    # networks:
-    #   net:
-    #     ipv4_address: 182.22.0.2
+    networks:
+      mynet:
+        ipv4_address: 172.22.0.15
 
     restart: always
   
   cli:
-    container_name: vue
+    container_name: school_vue
     build:
       context: ./vue
       dockerfile: Dockerfile_vue
@@ -29,13 +26,10 @@ services:
       - cli
     networks:
       mynet:
-        ipv4_address: 182.22.0.3
+        ipv4_address: 172.22.0.16
     restart: always
 
-# networks:
-#   net:
-#     driver: bridge
-#     ipam:
-#       config:
-#       - subnet: 182.22.0.0/24
-#         gateway: 182.22.0.1
+networks:
+  mynet:
+    name: vps_mynet
+    external: true
