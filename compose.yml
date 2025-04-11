@@ -9,7 +9,7 @@ services:
       dockerfile: Dockerfile_fastapi
 
     volumes:
-      - ./database:/fastapi/db 
+      - ./database:/fastapi/database
    
     networks:
       mynet:

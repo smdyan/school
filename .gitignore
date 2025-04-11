@@ -2,6 +2,7 @@
 .DS_Store
 .env
 database/
+*.jar
 
 ### VUE ###
 node_modules/
@@ -10,3 +11,5 @@ dist/
 
 ### VS Code ###
 .vscode/
+
+__pycache__/

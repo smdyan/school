@@ -1,4 +1,10 @@
-fastapi[standard]>=0.115.0,<0.116.0
-pydantic>=2.10.0,<3.0.0
-uvicorn>=0.34.0,<0.35.0
+# pip install -r requirements.txt
+
+fastapi[standard]==0.115.*
+uvicorn[standard]==0.34.*
 sqlmodel==0.0.24
+sqlalchemy==2.0.40
+alembic==1.15.*
+pydantic==2.11.*
+requests==2.32.*
+httpie==3.2.*
