@@ -12,3 +12,5 @@ class ScheduleCreate( ScheduleBase ):
 
 class Schedule( ScheduleBase, table=True ):
     id: int = Field( default=None, primary_key=True )
+
+

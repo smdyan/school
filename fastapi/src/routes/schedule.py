@@ -9,18 +9,12 @@ router = APIRouter( prefix="/sch" )
 
 
 @router.get("/")
-def get_week(
-    session: SessionDep,
-    offset: int = 0,
-    limit: Annotated[int, Query(le=100)] = 100,
-    ) -> list[Schedule]:
-    # result = session.exec(select(Schedule))
-    result = session.exec(select(Schedule).offset(offset).limit(limit)).all()
-    # schedules = result.scalars().all()
+def get_week( session: SessionDep ) -> list[Schedule]:
+    result = session.exec(select(Schedule).all())
     return [
-        Schedule(day=schedule.day,
+        Schedule( day=schedule.day,
                  lesson=schedule.lesson,
-                 id=schedule.id) for schedule in result
+                 id=schedule.id ) for schedule in result
     ]
 
 
