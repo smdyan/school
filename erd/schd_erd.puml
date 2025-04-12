@@ -1,0 +1,39 @@
+@startuml schd_erd
+'https://plantuml.com/object-diagram
+'Opt+D to Preview
+
+<style>
+    document {
+        BackGroundColor Linen
+    }
+    root {
+        FontColor #?black:white
+        LineColor gray
+    }
+</style>
+
+title SCHD_ERD
+
+object Lessons {
+    id
+    weekdayId
+    sequenceNum
+    subjectId
+}
+
+object Subjects {
+    id
+    name
+}
+
+object Weekdays {
+    id
+    sequenceNum
+    dayName
+}
+
+
+Subjects::id ||-l-o{ Lessons::subjectId
+Weekdays::id ||-r-o{ Lessons::weekdayId
+
+@enduml
