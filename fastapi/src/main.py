@@ -3,10 +3,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from src.routes.schedule import router
-from src.data.init import init_db
+from src.data.init import create_db_and_tables
+
 
 async def Lifespan(app: FastAPI):
-    await init_db()
+    await create_db_and_tables()
     print("game")
     yield
     print("over")

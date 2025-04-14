@@ -1,44 +1,56 @@
 from typing import Annotated
-from fastapi import HTTPException, Query, APIRouter
+from fastapi import HTTPException, APIRouter
 from sqlmodel import select
 from src.data.init import SessionDep
 from src.model.schedule import Lesson, LessonCreate, LessonPublic
+from src.model.schedule import Weekday, Subject
+from src.fake.schedule import createWeekdays, createSubjects
 
 
 router = APIRouter( prefix="/sch" )
 
+@router.get("/init")
+def push2db( session: SessionDep ):
+    createWeekdays( session )
+    createSubjects ( session )
+    return True
 
-@router.get("/")
-def getSchedule( session: SessionDep ) -> list[Lesson]:
-    result = session.exec(select(Lesson)).all()
-    return result
+# @router.get("/")
+# def getSchedule( session: SessionDep ) -> list[Lesson]:
+#     # select generates sql request for a table Lesson
+#     statement = select( Lesson )
+#     # get table object
+#     result = session.exec( statement )
+#     # create list of instances from iterable
+#     lessons = result.all()
+#     return lessons
 
 
-@router.get("/wd/{weekday}")
-def getSchedule( weekday: str, session: SessionDep ) -> list[Lesson]:
-    result = session.exec(select(Lesson).filter_by(weekday=weekday))
-    return [
-        Lesson( 
-            id=lesson.id,
-            weekday=lesson.weekday,
-            sequenceNum=lesson.sequenceNum,
-            subject=lesson.subject ) for lesson in result
-    ]
+# @router.get("/wd/{weekday}")
+# def getSchedule( weekday: str, session: SessionDep ) -> list[Lesson]:
+#     result = session.exec(select(Lesson).filter_by(weekday=weekday))
+#     return [
+#         Lesson( 
+#             id=lesson.id,
+#             weekday=lesson.weekday,
+#             lessonNum=lesson.lessonNum,
+#             subject=lesson.subject ) for lesson in result
+#     ]
 
 @router.post("/", response_model=LessonPublic)
 def addLesson( lesson: LessonCreate, session: SessionDep ):
-    db_lesson = Lesson.model_validate(lesson)
-    session.add( db_lesson )
+    dbLesson = Lesson.model_validate( lesson )
+    session.add( dbLesson )
     session.commit()
-    session.refresh( db_lesson )
-    return db_lesson
+    session.refresh( dbLesson )
+    return dbLesson
 
 
-@router.get("/id/{id}")
-async def getLesson(id: int, session: SessionDep) -> Lesson:
+@router.get("/id/{id}", response_model=LessonPublic)
+async def getLesson(id: int, session: SessionDep):
     lesson = session.get(Lesson, id)
     if not lesson:
-        raise HTTPException(status_code=404, detail="schedule not found")
+        raise HTTPException(status_code=404, detail="lesson not found")
     return lesson
 
 
@@ -46,7 +58,16 @@ async def getLesson(id: int, session: SessionDep) -> Lesson:
 async def deleteLesson(id: int, session: SessionDep):
     lesson = session.get(Lesson, id)
     if not lesson:
-        raise HTTPException(status_code=404, detail="schedule not found")
+        raise HTTPException(status_code=404, detail="lesson not found")
     session.delete( lesson )
     session.commit()
     return {"ok": True}
+
+
+@router.get("/")
+def getSchedule( session: SessionDep ):
+    statement = select( Lesson, Weekday, Subject ).join( Weekday ).join( Subject )
+    result = session.exec( statement )
+    for lesson, weekday, subject in result:
+            print("Lesson:", lesson, "Weekday:", weekday, "Subject:", subject)
+    return True

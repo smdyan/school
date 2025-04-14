@@ -3,6 +3,7 @@
 .env
 database/
 *.jar
+__pycache__/
 
 ### VUE ###
 node_modules/

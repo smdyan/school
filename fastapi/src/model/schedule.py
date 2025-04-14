@@ -1,10 +1,13 @@
+
 from sqlmodel import SQLModel, Field
 from typing import Optional
 
 
 class LessonBase( SQLModel ):
+    weekdayNum: int | None = Field(default=None, foreign_key="weekday.dayNum")
     weekday: str
-    sequenceNum: int
+    lessonNum: int
+    subjectId: int | None = Field(default=None, foreign_key="subject.id")
     subject: Optional[str] = None
 
 
@@ -22,8 +25,8 @@ class LessonPublic( LessonBase ):
 
 
 class WeekdayBase( SQLModel ):
-    sequenceNum: str
-    dayName: int
+    dayNum: int
+    dayName: str
 
 
 class Weekday( WeekdayBase, table=True ):
@@ -31,4 +34,16 @@ class Weekday( WeekdayBase, table=True ):
 
 
 class WeekdayCreate( WeekdayBase ):
+    pass
+
+
+class SubjectBase( SQLModel ):
+    Name: str
+
+
+class Subject( SubjectBase, table=True ):
+    id: int = Field( default=None, primary_key=True )
+
+
+class SubjectCreate( SubjectBase ):
     pass
