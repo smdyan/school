@@ -2,8 +2,10 @@ from typing import Annotated
 from fastapi import HTTPException, APIRouter
 from sqlmodel import select
 from src.data.init import SessionDep
-from src.model.schedule import Lesson, LessonCreate, LessonPublic
-from src.model.schedule import Weekday, Subject
+from src.model.lesson import Lesson, LessonCreate, LessonPublic
+from src.model.weekday import Weekday
+from src.model.subject import Subject
+from src.model.schedule import Schedule
 from src.fake.schedule import createWeekdays, createSubjects
 
 
@@ -64,10 +66,13 @@ async def deleteLesson(id: int, session: SessionDep):
     return {"ok": True}
 
 
-@router.get("/")
-def getSchedule( session: SessionDep ):
-    statement = select( Lesson, Weekday, Subject ).join( Weekday ).join( Subject )
+@router.get("/wd/{weekdayId}")
+def getSchedule( weekdayId: int, session: SessionDep ) -> Schedule:
+    statement = select( Lesson, Weekday.dayName, Subject.Name ).join( Weekday ).join( Subject ).where( Lesson.weekdayNum == weekdayId )
+    
     result = session.exec( statement )
     for lesson, weekday, subject in result:
-            print("Lesson:", lesson, "Weekday:", weekday, "Subject:", subject)
-    return True
+            print( "Lesson:", weekday, lesson.number, subject )
+            schedule = Schedule( weekday = weekday, lesson1=subject )
+
+    return schedule

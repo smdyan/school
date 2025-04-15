@@ -1,6 +1,6 @@
 
-from src.model.schedule import Weekday, WeekdayCreate
-from src.model.schedule import Subject, SubjectCreate
+from src.model.weekday import Weekday, WeekdayCreate
+from src.model.subject import Subject, SubjectCreate
 from sqlmodel import Session
 
 def createWeekdays( session: Session ):
