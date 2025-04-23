@@ -15,21 +15,25 @@
 title SCHD_ERD
 
 object Lessons {
-    id
-    weekdayId
-    sequenceNum
-    subjectId
+    *id: PK
+    *lessonNum
+    subjectId: FK
+    subject
+    weekdayId: FK
+    weekday
 }
 
 object Subjects {
-    id
-    name
+    *id: PK
+    *name
+    *lessons[]
 }
 
 object Weekdays {
-    id
-    sequenceNum
-    dayName
+    *id:PK
+    *dayNum
+    *dayName
+    lessons[]
 }
 
 
