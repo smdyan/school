@@ -2,7 +2,7 @@ name: school
 services:
 
   api:
-    container_name: school
+    container_name: school_api
 
     build:
       context: ./fastapi
