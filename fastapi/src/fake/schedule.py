@@ -15,7 +15,7 @@ def createWeekdays( session: Session ):
         return {"ok": True}
 
 def createSubjects( session: Session ):
-        names = ["Matematika", "Russkiy", "Risovanie", "Biology", "Geography", "Music", "Trud"]
+        names = ["Matematika", "Russkiy", "Risovanie", "Biology", "Geography", "Music", "Trud", "Geometry", "Odnknr", "Classhour", "Fizra", "English", "Literatura", "History"]
         for name in names:
                 subject = SubjectCreate( name=name )
                 dsubject = Subject.model_validate( subject )
