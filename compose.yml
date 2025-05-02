@@ -13,7 +13,7 @@ services:
    
     networks:
       mynet:
-        ipv4_address: 172.22.0.15
+        ipv4_address: 172.24.0.15
 
     restart: always
   
@@ -26,10 +26,10 @@ services:
       - cli
     networks:
       mynet:
-        ipv4_address: 172.22.0.16
+        ipv4_address: 172.24.0.16
     restart: always
 
 networks:
   mynet:
-    name: vps_mynet
+    name: twg4_mynet
     external: true
