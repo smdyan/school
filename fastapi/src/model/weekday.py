@@ -14,5 +14,6 @@ class Weekday( WeekdayBase, table=True ):
     id: int = Field( default=None, primary_key=True )
     lessons: Optional[list["Lesson"]] = Relationship( back_populates="weekday" )
 
+
 class WeekdayCreate( WeekdayBase ):
     pass
