@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": "fastapi"
+		},
+		{
+			"path": "epaper_cli"
+		},
+		{
+			"path": "."
+		}
+	],
+	"settings": {}
+}

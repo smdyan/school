@@ -1,0 +1,4 @@
+dependencies:
+  espressif/led_strip: "^3.0.0"
+  tuanpmt/esp_epaper: "^1.0.4"
+  lvgl/lvgl: "^9.4.0"

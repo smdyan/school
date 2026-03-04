@@ -1,0 +1,31 @@
+# ESP-IDF build artifacts
+build/
+build_*_*/
+sdkconfig
+sdkconfig.old
+
+# idf-component-manager output
+dependencies.lock
+managed_components
+
+# Testing and coverage reports
+.pytest_cache/
+__pycache__/
+pytest_embedded_log/
+app_info_*.txt
+size_info_*.txt
+*.gcda
+*.gcno
+coverage.info
+coverage_report/
+
+# VS Code and IDE specific settings (optional, depending on preference)
+.vscode/
+.idea/
+cmake-build-*/
+
+# macOS specific directory files
+.DS_Store
+
+# clangd config (for LSP)
+.clangd
