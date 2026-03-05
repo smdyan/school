@@ -46,4 +46,12 @@ menu "Example Configuration"
         help
             Define the blinking period in milliseconds.
 
+    config WIFI_SSID
+        string "WiFi SSID"
+        default ""
+
+    config WIFI_PASS
+        string "WiFi Password"
+        default ""
+
 endmenu
