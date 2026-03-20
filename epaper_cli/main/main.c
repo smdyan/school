@@ -38,7 +38,7 @@ static const char* reset_reason_str(esp_reset_reason_t r) {
     }
 }
 
-// WeAct ESP32-C6 mini pins (как в вашем Arduino примере)
+// WeAct ESP32-C6 mini pins
 #define PIN_SCL   GPIO_NUM_18
 #define PIN_SDA   GPIO_NUM_19
 #define PIN_CS    GPIO_NUM_20
@@ -66,18 +66,18 @@ void init_lvgl_tick(void)
 }
 
 // Сохраняется между deep sleep
-RTC_DATA_ATTR static uint8_t pos_toggle = 0;
-RTC_DATA_ATTR static int32_t rtc_minutes = 0;  // минуты от 00:00 (0..1439)
+//RTC_DATA_ATTR static uint8_t pos_toggle = 0;
+//RTC_DATA_ATTR static int32_t rtc_minutes = 0;  // минуты от 00:00 (0..1439)
 
 // формат HH:MM
-static void format_hhmm(char *out, size_t out_sz, int32_t minutes)
-{
-    minutes %= (24 * 60);
-    if (minutes < 0) minutes += 24 * 60;
-    int hh = minutes / 60;
-    int mm = minutes % 60;
-    snprintf(out, out_sz, "%02d:%02d", hh, mm);
-}
+//static void format_hhmm(char *out, size_t out_sz, int32_t minutes)
+//{
+//    minutes %= (24 * 60);
+//    if (minutes < 0) minutes += 24 * 60;
+//    int hh = minutes / 60;
+//    int mm = minutes % 60;
+//    snprintf(out, out_sz, "%02d:%02d", hh, mm);
+//}
 
 
 #define WIFI_SSID CONFIG_WIFI_SSID
@@ -185,7 +185,6 @@ static esp_err_t http_get_to_buffer(const char *url, char *out, size_t out_sz)
     int status = esp_http_client_get_status_code(client);
     printf("HTTP status=%d, content_length=%lld\n", status, (long long)cl);
 
-    // Читать тело можно даже при 404, если вы хотите распарсить {"detail":"Not Found"}
     int total = 0;
     while (1) {
         int r = esp_http_client_read(client, out + total, (int)out_sz - 1 - total);
@@ -203,11 +202,9 @@ static esp_err_t http_get_to_buffer(const char *url, char *out, size_t out_sz)
     esp_http_client_close(client);
     esp_http_client_cleanup(client);
 
-    // Вернём OK если хоть что-то прочитали
     return (total > 0) ? ESP_OK : ESP_FAIL;
 }
 
-// Получить значение "первого поля" JSON-объекта как строку в out_value
 static bool json_value_by_key(const char *json, const char *key,
                               char *out_value, size_t out_sz)
 {
@@ -245,6 +242,36 @@ static bool json_value_by_key(const char *json, const char *key,
 }
 
 
+static bool json_lessons_to_text(const char *json, const char *key, char *out, size_t out_sz)
+{
+    cJSON *root = cJSON_Parse(json);
+    if (!root) return false;
+
+    cJSON *arr = cJSON_GetObjectItemCaseSensitive(root, key);
+    if (!cJSON_IsArray(arr)) {
+        cJSON_Delete(root);
+        return false;
+    }
+
+    out[0] = '\0';
+    size_t used = 0;
+
+    int n = cJSON_GetArraySize(arr);
+    for (int i = 0; i < n; i++) {
+        cJSON *it = cJSON_GetArrayItem(arr, i);
+        if (!cJSON_IsString(it) || !it->valuestring) continue;
+
+        // "1) Matematika\n"
+        int written = snprintf(out + used, out_sz - used, "%d. %s\n", i + 1, it->valuestring);
+        if (written < 0 || (size_t)written >= out_sz - used) break;
+        used += (size_t)written;
+    }
+
+    cJSON_Delete(root);
+    return (used > 0);
+}
+
+
 void app_main(void)
 {
 	vTaskDelay(pdMS_TO_TICKS(1000));			// Окно на включение монитора
@@ -256,34 +283,26 @@ void app_main(void)
 	printf("Wakeup cause: %d\n", (int)wc);
 	fflush(stdout);
 	vTaskDelay(pdMS_TO_TICKS(1000));			// Окно, чтобы вы успели увидеть вывод
-		
-	esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
-	
-	if (cause == ESP_SLEEP_WAKEUP_TIMER) {
-	    rtc_minutes += (int32_t)(WAKE_PERIOD_US / 1000000ULL) / 60;
-	} else {
-	    rtc_minutes = 0;
-	    pos_toggle = 0;
-	}
-	pos_toggle ^= 1;
 	
 	char http_buf[HTTP_RX_MAX];
-	char value[128];
-	bool got = false;
-	
+	char day[32];
+    char lessons_txt[256];
+    bool got_day = false;
+    bool got_lessons = false;
+    
     if (wifi_connect_sta() == ESP_OK) {
         printf("wifi connectedd + 1.0sec pause\n");
         fflush(stdout);
         if (http_get_to_buffer(API_URL, http_buf, sizeof(http_buf)) == ESP_OK) {
             ESP_LOGI(TAG, "Wi-Fi connected");
             vTaskDelay(pdMS_TO_TICKS(1000));
-            got = json_value_by_key(http_buf, "dayName", value, sizeof(value));
+            got_day = json_value_by_key(http_buf, "dayName", day, sizeof(day));
+            got_lessons = json_lessons_to_text(http_buf, "lessons", lessons_txt, sizeof(lessons_txt));
         }
     } else {
         ESP_LOGW(TAG, "Wi-Fi connect failed");
     }
     wifi_disconnect_sta();
-	
 	
 	lv_init();
 	init_lvgl_tick();
@@ -321,21 +340,21 @@ void app_main(void)
     // Рисуем
     lv_obj_t *scr = lv_screen_active();
     lv_obj_t *json_label = lv_label_create(scr);
-	if (got) {
-	    lv_label_set_text(json_label, value);
-	} else {
-	    lv_label_set_text(json_label, "API error");
-	}
-    lv_obj_align(json_label, LV_ALIGN_TOP_LEFT, 0, +5);
+    lv_label_set_long_mode(json_label, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(json_label, 296);              // под ширину твоего дисплея (подстрой)
+    lv_obj_align(json_label, LV_ALIGN_TOP_LEFT, 0, 5);
 
-	char time_str[6];
-	format_hhmm(time_str, sizeof(time_str), rtc_minutes);
-	
-	int y_offset = pos_toggle ? -25 : +25;
-
-	lv_obj_t *time_label = lv_label_create(scr);
-	lv_label_set_text(time_label, time_str);
-	lv_obj_align(time_label, LV_ALIGN_CENTER, 0, y_offset);
+    if (got_day) {
+        if (got_lessons) {
+            static char text[400];
+            snprintf(text, sizeof(text), "%s\n%s", day, lessons_txt);
+            lv_label_set_text(json_label, text);
+        } else {
+            lv_label_set_text_fmt(json_label, "%s\n(no lessons)", day);
+        }
+    } else {
+        lv_label_set_text(json_label, "API error");
+    }
 	
     // Отрисовать и выполнить физический refresh
     lv_refr_now(disp);
@@ -349,12 +368,13 @@ void app_main(void)
 	// Включаем пробуждение по таймеру
 	esp_sleep_enable_timer_wakeup(WAKE_PERIOD_US);
 	
-	printf("Going to deep sleep. Next pos=%d\n", pos_toggle);
+	printf("Going to deep sleep. Next pos\n");
 	fflush(stdout);
 	vTaskDelay(pdMS_TO_TICKS(100)); // дать логу уйти в порт
 	
 	// Deep sleep (после пробуждения будет полный рестарт)
 	esp_deep_sleep_start();
 	// while(1){
-	// 	vTaskDelay(pdMS_TO_TICKS(1000));
-	}
+	//     vTaskDelay(pdMS_TO_TICKS(1000));
+	// }
+}
