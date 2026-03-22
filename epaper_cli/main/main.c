@@ -2,16 +2,17 @@
 #include <stdbool.h>
 #include <time.h>
 #include "driver/gpio.h"
+#include "nvs_flash.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
-#include "esp_log.h"
 #include "lvgl.h"
-#include "epaper.h"
 #include "epaper_lvgl.h"
+#include "epaper.h"
+#include "esp_netif_sntp.h"
+#include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_sleep.h"
-#include "nvs_flash.h"
 #include "esp_event.h"
 #include "esp_netif.h"
 #include "esp_wifi.h"
@@ -19,10 +20,9 @@
 #include "cJSON.h"
 
 
-static const char *TAG = "HELLO";
 
-#define WAKE_PERIOD_US      (60ULL * 1000000ULL)   // 60 секунд
-#define DEBUG_AWAKE_MS      2000                   // 2 секунды остаёмся бодрствовать для отладки
+// System
+static const char *TAG = "HELLO";
 
 static const char* reset_reason_str(esp_reset_reason_t r) {
     switch (r) {
@@ -46,16 +46,12 @@ static const char* reset_reason_str(esp_reset_reason_t r) {
 #define PIN_RST   GPIO_NUM_22
 #define PIN_BUSY  GPIO_NUM_23
 
-// LVGL tick (обязателен для LVGL)
-
-static void lv_tick_cb(void *arg)
-{
+static void lv_tick_cb(void *arg) {
     (void)arg;
     lv_tick_inc(10);
 }
 
-void init_lvgl_tick(void)
-{
+void init_lvgl_tick(void) {
     const esp_timer_create_args_t args = {
         .callback = &lv_tick_cb,
         .name = "lv_tick"
@@ -65,32 +61,71 @@ void init_lvgl_tick(void)
 	ESP_ERROR_CHECK(esp_timer_start_periodic(t, 10 * 1000)); // 10ms в микросекундах
 }
 
-// Сохраняется между deep sleep
-//RTC_DATA_ATTR static uint8_t pos_toggle = 0;
-//RTC_DATA_ATTR static int32_t rtc_minutes = 0;  // минуты от 00:00 (0..1439)
+// Время
+#define WAKE_PERIOD_US      (50ULL * 1000000ULL)        // 60 секунд
 
-// формат HH:MM
-//static void format_hhmm(char *out, size_t out_sz, int32_t minutes)
-//{
-//    minutes %= (24 * 60);
-//    if (minutes < 0) minutes += 24 * 60;
-//    int hh = minutes / 60;
-//    int mm = minutes % 60;
-//    snprintf(out, out_sz, "%02d:%02d", hh, mm);
-//}
+RTC_DATA_ATTR static time_t rtc_epoch_at_sleep = 0;     // epoch перед сном
+RTC_DATA_ATTR static int rtc_last_yday = -1;            // день года последней синхры
+RTC_DATA_ATTR static bool rtc_time_valid = false;       // было ли время хоть раз синхронизировано
+
+static time_t approx_now_after_wake(uint64_t slept_us) {
+    if (!rtc_time_valid) return 0;
+    return rtc_epoch_at_sleep + (time_t)(slept_us / 1000000ULL);
+}
+
+// static bool need_daily_sync(time_t now_est) {
+//     if (!rtc_time_valid) return true;                   // первый раз всегда синхронизируем
+
+//     struct tm tm;
+//     localtime_r(&now_est, &tm);
+//     if (rtc_last_yday == -1) return true;
+
+//     return (tm.tm_yday != rtc_last_yday);               // если день сменился — синхронизируем
+// }
+
+static bool need_test_sync(time_t now_est) {
+    if (!rtc_time_valid) return true;
+
+    struct tm tm;
+    localtime_r(&now_est, &tm);
+    if (rtc_last_yday == -1) return true;
+
+    return (tm.tm_min%5 == 0);
+}
 
 
+static esp_err_t obtain_time_once(void) {
+    esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
+    esp_netif_sntp_init(&config);
+
+    time_t now = 0;
+    struct tm ti = {0};
+
+    for (int i = 0; i < 20; i++) {
+        time(&now);
+        localtime_r(&now, &ti);
+        if (ti.tm_year > (2016 - 1900)) {
+            esp_netif_sntp_deinit();
+            return ESP_OK;
+        }
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+
+    esp_netif_sntp_deinit();
+    return ESP_FAIL;
+}
+
+//wifi
 #define WIFI_SSID CONFIG_WIFI_SSID
 #define WIFI_PASS CONFIG_WIFI_PASS
+#define API_URL "http://192.168.1.115:8080/school/schedule/1"
 
 static EventGroupHandle_t s_wifi_event_group;
 static const int WIFI_CONNECTED_BIT = BIT0;
 static const int WIFI_FAIL_BIT      = BIT1;
 static int s_retry_num = 0;
 
-static void wifi_event_handler(void* arg, esp_event_base_t event_base,
-                               int32_t event_id, void* event_data)
-{
+static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data) {
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
         esp_wifi_connect();
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
@@ -106,8 +141,7 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
     }
 }
 
-static esp_err_t wifi_connect_sta(void)
-{
+static esp_err_t wifi_connect_sta(void) {
     // NVS нужен Wi-Fi стеку
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -134,7 +168,6 @@ static esp_err_t wifi_connect_sta(void)
     snprintf((char*)wifi_config.sta.ssid, sizeof(wifi_config.sta.ssid), "%s", WIFI_SSID);
     snprintf((char*)wifi_config.sta.password, sizeof(wifi_config.sta.password), "%s", WIFI_PASS);
 
-    // Для WPA2/WPA3 mixed обычно ок:
     wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
@@ -154,19 +187,16 @@ static esp_err_t wifi_connect_sta(void)
     return ESP_FAIL;
 }
 
-static void wifi_disconnect_sta(void)
-{
-    // аккуратно гасим Wi-Fi перед sleep
+static void wifi_disconnect_sta(void) {
     esp_wifi_stop();
     esp_wifi_deinit();
 }
 
 
-#define API_URL "http://192.168.1.115:8080/school/schedule/1"
+//json
 #define HTTP_RX_MAX 2048
 
-static esp_err_t http_get_to_buffer(const char *url, char *out, size_t out_sz)
-{
+static esp_err_t http_get_to_buffer(const char *url, char *out, size_t out_sz) {
     esp_http_client_config_t cfg = {
         .url = url,
         .timeout_ms = 8000,
@@ -205,9 +235,7 @@ static esp_err_t http_get_to_buffer(const char *url, char *out, size_t out_sz)
     return (total > 0) ? ESP_OK : ESP_FAIL;
 }
 
-static bool json_value_by_key(const char *json, const char *key,
-                              char *out_value, size_t out_sz)
-{
+static bool json_value_by_key(const char *json, const char *key, char *out_value, size_t out_sz) {
     cJSON *root = cJSON_Parse(json);
     if (!root) return false;
 
@@ -242,8 +270,7 @@ static bool json_value_by_key(const char *json, const char *key,
 }
 
 
-static bool json_lessons_to_text(const char *json, const char *key, char *out, size_t out_sz)
-{
+static bool json_lessons_to_text(const char *json, const char *key, char *out, size_t out_sz) {
     cJSON *root = cJSON_Parse(json);
     if (!root) return false;
 
@@ -271,41 +298,19 @@ static bool json_lessons_to_text(const char *json, const char *key, char *out, s
     return (used > 0);
 }
 
+// *** *** *** *** ***
+void app_main(void) {
 
-void app_main(void)
-{
 	vTaskDelay(pdMS_TO_TICKS(1000));			// Окно на включение монитора
 	esp_rom_printf("\nROM: boottt\n");
 	esp_reset_reason_t rr = esp_reset_reason();
 	esp_sleep_wakeup_cause_t wc = esp_sleep_get_wakeup_cause();
-
 	printf("Reset reason: %s (%d)\n", reset_reason_str(rr), (int)rr);
 	printf("Wakeup cause: %d\n", (int)wc);
 	fflush(stdout);
 	vTaskDelay(pdMS_TO_TICKS(1000));			// Окно, чтобы вы успели увидеть вывод
-	
-	char http_buf[HTTP_RX_MAX];
-	char day[32];
-    char lessons_txt[256];
-    bool got_day = false;
-    bool got_lessons = false;
-    
-    if (wifi_connect_sta() == ESP_OK) {
-        printf("wifi connectedd + 1.0sec pause\n");
-        fflush(stdout);
-        if (http_get_to_buffer(API_URL, http_buf, sizeof(http_buf)) == ESP_OK) {
-            ESP_LOGI(TAG, "Wi-Fi connected");
-            vTaskDelay(pdMS_TO_TICKS(1000));
-            got_day = json_value_by_key(http_buf, "dayName", day, sizeof(day));
-            got_lessons = json_lessons_to_text(http_buf, "lessons", lessons_txt, sizeof(lessons_txt));
-        }
-    } else {
-        ESP_LOGW(TAG, "Wi-Fi connect failed");
-    }
-    wifi_disconnect_sta();
-	
+
 	lv_init();
-	init_lvgl_tick();
 
     epd_config_t cfg = {
         .pins = {
@@ -328,53 +333,114 @@ void app_main(void)
         },
     };
 
-    epd_handle_t epd;
+    epd_handle_t epd = NULL;
     ESP_ERROR_CHECK(epd_init(&cfg, &epd));
 
+
+    // Initialize LVGL display with partial refresh and dithering
     epd_lvgl_config_t lvgl_cfg = EPD_LVGL_CONFIG_DEFAULT();
     lvgl_cfg.epd = epd;
-    lvgl_cfg.update_mode = EPD_UPDATE_FULL;
+    lvgl_cfg.update_mode = EPD_UPDATE_PARTIAL;
+    lvgl_cfg.use_partial_refresh = true;
+    lvgl_cfg.partial_threshold = 2000;  // Force full refresh every N partial updates
+    //lvgl_cfg.dither_mode = EPD_DITHER_FLOYD_STEINBERG;  // Enable grayscale dithering
 
     lv_display_t *disp = epd_lvgl_init(&lvgl_cfg);
+    if (!disp) {
+        ESP_LOGE(TAG, "Failed to init LVGL display");
+        epd_deinit(epd);
+        return;
+    }
 
-    // Рисуем
+    // Get panel info
+    epd_panel_info_t panel_info;
+    epd_get_info(epd, &panel_info);
+    ESP_LOGI(TAG, "Panel: %dx%d, buffer: %lu bytes", 
+             panel_info.width, panel_info.height, panel_info.buffer_size);
+
+    init_lvgl_tick();
     lv_obj_t *scr = lv_screen_active();
-    lv_obj_t *json_label = lv_label_create(scr);
+    
+    static lv_obj_t *json_label = NULL;
+    json_label = lv_label_create(scr);
     lv_label_set_long_mode(json_label, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(json_label, 296);              // под ширину твоего дисплея (подстрой)
+    lv_obj_set_width(json_label, 296);
     lv_obj_align(json_label, LV_ALIGN_TOP_LEFT, 0, 5);
+    
+    static lv_obj_t *sleep_label = NULL;
+    sleep_label = lv_label_create(scr);
+    lv_obj_align(sleep_label, LV_ALIGN_BOTTOM_LEFT, 0, -5);
+    lv_label_set_text(sleep_label, "");
+    //lv_area_t area = {0,256,128,296};
 
-    if (got_day) {
-        if (got_lessons) {
-            static char text[400];
-            snprintf(text, sizeof(text), "%s\n%s", day, lessons_txt);
-            lv_label_set_text(json_label, text);
+    char http_buf[HTTP_RX_MAX];
+    char day[32];
+    char lessons_txt[256];
+    bool got_day = false;
+    bool got_lessons = false;
+	
+    setenv("TZ", "UTC-3", 1);
+    tzset();
+    uint64_t slept_us = WAKE_PERIOD_US;         // если фиксированно
+    time_t now_est = approx_now_after_wake(slept_us);
+    struct tm tm;
+
+    if (need_test_sync(now_est)) {
+        if (wifi_connect_sta() == ESP_OK) {
+            printf("wifi connectedd + 1.0sec pause\n");
+            fflush(stdout);
+
+            if (obtain_time_once() == ESP_OK) {
+                time_t now;
+                time(&now);
+                localtime_r(&now, &tm);
+
+                rtc_last_yday = tm.tm_yday;
+                rtc_time_valid = true;
+            }
+            if (http_get_to_buffer(API_URL, http_buf, sizeof(http_buf)) == ESP_OK) {
+                ESP_LOGI(TAG, "api read");
+                vTaskDelay(pdMS_TO_TICKS(500));
+                got_day = json_value_by_key(http_buf, "dayName", day, sizeof(day));
+                got_lessons = json_lessons_to_text(http_buf, "lessons", lessons_txt, sizeof(lessons_txt));
+            }
+            wifi_disconnect_sta();
         } else {
-            lv_label_set_text_fmt(json_label, "%s\n(no lessons)", day);
+            ESP_LOGW(TAG, "Wi-Fi connect failed");
         }
-    } else {
-        lv_label_set_text(json_label, "API error");
+
+        // Рисуем
+        if (got_day) {
+            if (got_lessons) {
+                static char text[400];
+                localtime_r(&now_est, &tm);
+                snprintf(text, sizeof(text), "%s\n%s\n%d", day, lessons_txt, tm.tm_min);
+                lv_label_set_text(json_label, text);
+            } else {
+                lv_label_set_text_fmt(json_label, "%s\n(no lessons)", day);
+            }
+        } else {
+            lv_label_set_text(json_label, "API error");
+        }
+        //epd_lvgl_force_full_refresh(disp);          // Force full refresh
+        //ESP_LOGI(TAG, "EPD full refresh");
     }
 	
-    // Отрисовать и выполнить физический refresh
+    lv_label_set_text(sleep_label, "Going sleep...");
     lv_refr_now(disp);
     epd_lvgl_refresh(disp);
-    ESP_LOGI(TAG, "EPD refreshed");
 
-    // Перевести дисплей в сон (полезно для low-power)
-    epd_sleep(epd);
-	vTaskDelay(pdMS_TO_TICKS(20));
-
-	// Включаем пробуждение по таймеру
-	esp_sleep_enable_timer_wakeup(WAKE_PERIOD_US);
 	
-	printf("Going to deep sleep. Next pos\n");
+    printf("Going to deep sleep. Next pos\n");
 	fflush(stdout);
-	vTaskDelay(pdMS_TO_TICKS(100)); // дать логу уйти в порт
+	vTaskDelay(pdMS_TO_TICKS(100));
 	
-	// Deep sleep (после пробуждения будет полный рестарт)
-	esp_deep_sleep_start();
-	// while(1){
-	//     vTaskDelay(pdMS_TO_TICKS(1000));
-	// }
+	// Deep sleep
+    epd_sleep(epd);                     // Перевести дисплей в сон (полезно для low-power)
+	vTaskDelay(pdMS_TO_TICKS(20));
+    time_t before_sleep;
+    time(&before_sleep);
+    rtc_epoch_at_sleep = before_sleep;
+    esp_sleep_enable_timer_wakeup(WAKE_PERIOD_US);
+    esp_deep_sleep_start();
 }
