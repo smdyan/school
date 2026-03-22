@@ -20,9 +20,8 @@
 #include "cJSON.h"
 
 
-
 // System
-static const char *TAG = "HELLO";
+static const char *TAG = "SCHED_CLIENT";
 
 static const char* reset_reason_str(esp_reset_reason_t r) {
     switch (r) {
@@ -62,37 +61,7 @@ void init_lvgl_tick(void) {
 }
 
 // Время
-#define WAKE_PERIOD_US      (50ULL * 1000000ULL)        // 60 секунд
-
-RTC_DATA_ATTR static time_t rtc_epoch_at_sleep = 0;     // epoch перед сном
-RTC_DATA_ATTR static int rtc_last_yday = -1;            // день года последней синхры
-RTC_DATA_ATTR static bool rtc_time_valid = false;       // было ли время хоть раз синхронизировано
-
-static time_t approx_now_after_wake(uint64_t slept_us) {
-    if (!rtc_time_valid) return 0;
-    return rtc_epoch_at_sleep + (time_t)(slept_us / 1000000ULL);
-}
-
-// static bool need_daily_sync(time_t now_est) {
-//     if (!rtc_time_valid) return true;                   // первый раз всегда синхронизируем
-
-//     struct tm tm;
-//     localtime_r(&now_est, &tm);
-//     if (rtc_last_yday == -1) return true;
-
-//     return (tm.tm_yday != rtc_last_yday);               // если день сменился — синхронизируем
-// }
-
-static bool need_test_sync(time_t now_est) {
-    if (!rtc_time_valid) return true;
-
-    struct tm tm;
-    localtime_r(&now_est, &tm);
-    if (rtc_last_yday == -1) return true;
-
-    return (tm.tm_min%5 == 0);
-}
-
+#define WAKE_PERIOD_US      (3600ULL * 1000000ULL)        // 1 час
 
 static esp_err_t obtain_time_once(void) {
     esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
@@ -118,7 +87,7 @@ static esp_err_t obtain_time_once(void) {
 //wifi
 #define WIFI_SSID CONFIG_WIFI_SSID
 #define WIFI_PASS CONFIG_WIFI_PASS
-#define API_URL "http://192.168.1.115:8080/school/schedule/1"
+#define API_URL "http://192.168.1.115:8080/school/schedule/"
 
 static EventGroupHandle_t s_wifi_event_group;
 static const int WIFI_CONNECTED_BIT = BIT0;
@@ -142,22 +111,11 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t e
 }
 
 static esp_err_t wifi_connect_sta(void) {
-    // NVS нужен Wi-Fi стеку
-    esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        ESP_ERROR_CHECK(nvs_flash_init());
-    }
-
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-
-    esp_netif_create_default_wifi_sta();
-
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
 
     s_wifi_event_group = xEventGroupCreate();
+    s_retry_num = 0;
 
     ESP_ERROR_CHECK(esp_event_handler_instance_register(
         WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, NULL));
@@ -167,7 +125,6 @@ static esp_err_t wifi_connect_sta(void) {
     wifi_config_t wifi_config = { 0 };
     snprintf((char*)wifi_config.sta.ssid, sizeof(wifi_config.sta.ssid), "%s", WIFI_SSID);
     snprintf((char*)wifi_config.sta.password, sizeof(wifi_config.sta.password), "%s", WIFI_PASS);
-
     wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
@@ -178,18 +135,20 @@ static esp_err_t wifi_connect_sta(void) {
         s_wifi_event_group,
         WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
         pdTRUE, pdFALSE,
-        pdMS_TO_TICKS(15000)  // 15 сек таймаут
+        pdMS_TO_TICKS(15000)
     );
 
-    if (bits & WIFI_CONNECTED_BIT) {
-        return ESP_OK;
-    }
-    return ESP_FAIL;
+    return (bits & WIFI_CONNECTED_BIT) ? ESP_OK : ESP_FAIL;
 }
 
 static void wifi_disconnect_sta(void) {
     esp_wifi_stop();
     esp_wifi_deinit();
+
+    if (s_wifi_event_group) {
+        vEventGroupDelete(s_wifi_event_group);
+        s_wifi_event_group = NULL;
+    }
 }
 
 
@@ -288,7 +247,7 @@ static bool json_lessons_to_text(const char *json, const char *key, char *out, s
         cJSON *it = cJSON_GetArrayItem(arr, i);
         if (!cJSON_IsString(it) || !it->valuestring) continue;
 
-        // "1) Matematika\n"
+        // "1. Matematika\n"
         int written = snprintf(out + used, out_sz - used, "%d. %s\n", i + 1, it->valuestring);
         if (written < 0 || (size_t)written >= out_sz - used) break;
         used += (size_t)written;
@@ -298,7 +257,8 @@ static bool json_lessons_to_text(const char *json, const char *key, char *out, s
     return (used > 0);
 }
 
-// *** *** *** *** ***
+// *** *** *** *** *** *** ***
+
 void app_main(void) {
 
 	vTaskDelay(pdMS_TO_TICKS(1000));			// Окно на включение монитора
@@ -308,7 +268,7 @@ void app_main(void) {
 	printf("Reset reason: %s (%d)\n", reset_reason_str(rr), (int)rr);
 	printf("Wakeup cause: %d\n", (int)wc);
 	fflush(stdout);
-	vTaskDelay(pdMS_TO_TICKS(1000));			// Окно, чтобы вы успели увидеть вывод
+	vTaskDelay(pdMS_TO_TICKS(100));
 
 	lv_init();
 
@@ -337,42 +297,24 @@ void app_main(void) {
     ESP_ERROR_CHECK(epd_init(&cfg, &epd));
 
 
-    // Initialize LVGL display with partial refresh and dithering
+    // Initialize LVGL display
     epd_lvgl_config_t lvgl_cfg = EPD_LVGL_CONFIG_DEFAULT();
     lvgl_cfg.epd = epd;
-    lvgl_cfg.update_mode = EPD_UPDATE_PARTIAL;
-    lvgl_cfg.use_partial_refresh = true;
-    lvgl_cfg.partial_threshold = 2000;  // Force full refresh every N partial updates
-    //lvgl_cfg.dither_mode = EPD_DITHER_FLOYD_STEINBERG;  // Enable grayscale dithering
-
+    lvgl_cfg.update_mode = EPD_UPDATE_FULL;
     lv_display_t *disp = epd_lvgl_init(&lvgl_cfg);
     if (!disp) {
         ESP_LOGE(TAG, "Failed to init LVGL display");
         epd_deinit(epd);
         return;
     }
-
-    // Get panel info
-    epd_panel_info_t panel_info;
-    epd_get_info(epd, &panel_info);
-    ESP_LOGI(TAG, "Panel: %dx%d, buffer: %lu bytes", 
-             panel_info.width, panel_info.height, panel_info.buffer_size);
-
+    
     init_lvgl_tick();
     lv_obj_t *scr = lv_screen_active();
-    
-    static lv_obj_t *json_label = NULL;
-    json_label = lv_label_create(scr);
-    lv_label_set_long_mode(json_label, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(json_label, 296);
-    lv_obj_align(json_label, LV_ALIGN_TOP_LEFT, 0, 5);
-    
-    static lv_obj_t *sleep_label = NULL;
-    sleep_label = lv_label_create(scr);
-    lv_obj_align(sleep_label, LV_ALIGN_BOTTOM_LEFT, 0, -5);
-    lv_label_set_text(sleep_label, "");
-    //lv_area_t area = {0,256,128,296};
 
+    epd_panel_info_t panel_info;
+    epd_get_info(epd, &panel_info);
+    ESP_LOGI(TAG, "Panel: %dx%d, buffer: %lu bytes", panel_info.width, panel_info.height, panel_info.buffer_size);
+    
     char http_buf[HTTP_RX_MAX];
     char day[32];
     char lessons_txt[256];
@@ -381,66 +323,79 @@ void app_main(void) {
 	
     setenv("TZ", "UTC-3", 1);
     tzset();
-    uint64_t slept_us = WAKE_PERIOD_US;         // если фиксированно
-    time_t now_est = approx_now_after_wake(slept_us);
     struct tm tm;
+    time_t now = 0;
+    time(&now);
+    localtime_r(&now, &tm);
 
-    if (need_test_sync(now_est)) {
-        if (wifi_connect_sta() == ESP_OK) {
-            printf("wifi connectedd + 1.0sec pause\n");
-            fflush(stdout);
 
-            if (obtain_time_once() == ESP_OK) {
-                time_t now;
-                time(&now);
-                localtime_r(&now, &tm);
+    ESP_ERROR_CHECK(nvs_flash_init());
+    ESP_ERROR_CHECK(esp_netif_init());
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    esp_netif_create_default_wifi_sta();
 
-                rtc_last_yday = tm.tm_yday;
-                rtc_time_valid = true;
-            }
-            if (http_get_to_buffer(API_URL, http_buf, sizeof(http_buf)) == ESP_OK) {
-                ESP_LOGI(TAG, "api read");
-                vTaskDelay(pdMS_TO_TICKS(500));
-                got_day = json_value_by_key(http_buf, "dayName", day, sizeof(day));
-                got_lessons = json_lessons_to_text(http_buf, "lessons", lessons_txt, sizeof(lessons_txt));
-            }
-            wifi_disconnect_sta();
-        } else {
-            ESP_LOGW(TAG, "Wi-Fi connect failed");
+    if (wifi_connect_sta() == ESP_OK) {
+        ESP_LOGI(TAG, "wifi connected");
+        vTaskDelay(pdMS_TO_TICKS(500));
+
+        if (obtain_time_once() == ESP_OK) {
+            time(&now);
+            localtime_r(&now, &tm);
         }
-
-        // Рисуем
-        if (got_day) {
-            if (got_lessons) {
-                static char text[400];
-                localtime_r(&now_est, &tm);
-                snprintf(text, sizeof(text), "%s\n%s\n%d", day, lessons_txt, tm.tm_min);
-                lv_label_set_text(json_label, text);
-            } else {
-                lv_label_set_text_fmt(json_label, "%s\n(no lessons)", day);
-            }
-        } else {
-            lv_label_set_text(json_label, "API error");
+        static char schedule_url[128];
+        
+        int week_day = tm.tm_wday;
+        if( week_day == 0) {
+            week_day = 7;
         }
-        //epd_lvgl_force_full_refresh(disp);          // Force full refresh
-        //ESP_LOGI(TAG, "EPD full refresh");
+        snprintf(schedule_url, sizeof(schedule_url), API_URL "%d", week_day);
+        if (http_get_to_buffer(schedule_url, http_buf, sizeof(http_buf)) == ESP_OK) {
+            ESP_LOGI(TAG, "api read");
+            vTaskDelay(pdMS_TO_TICKS(500));
+            got_day = json_value_by_key(http_buf, "dayName", day, sizeof(day));
+            got_lessons = json_lessons_to_text(http_buf, "lessons", lessons_txt, sizeof(lessons_txt));
+        }
+        wifi_disconnect_sta();
+    } else {
+        ESP_LOGW(TAG, "Wi-Fi connect failed");
+    }
+
+    // Рисуем
+    lv_obj_t *json_label = NULL;
+    json_label = lv_label_create(scr);
+    lv_label_set_long_mode(json_label, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(json_label, 296);
+    lv_obj_align(json_label, LV_ALIGN_TOP_LEFT, 0, 5);
+
+    if (got_day) {
+        if (got_lessons) {
+            static char text[400];
+            snprintf(text, sizeof(text), "%s\n%s\n", day, lessons_txt);
+            lv_label_set_text(json_label, text);
+        } else {
+            lv_label_set_text_fmt(json_label, "%s\n(no lessons)", day);
+        }
+    } else {
+        lv_label_set_text(json_label, "API error");
     }
 	
-    lv_label_set_text(sleep_label, "Going sleep...");
+    lv_obj_t *sleep_label = NULL;
+    sleep_label = lv_label_create(scr);
+    lv_obj_align(sleep_label, LV_ALIGN_BOTTOM_LEFT, 0, -5);
+    char hhmmss[40];
+    strftime(hhmmss, sizeof(hhmmss), "Updated %H:%M", &tm);
+    lv_label_set_text(sleep_label, hhmmss);
+    
+    ESP_LOGI(TAG, "EPD full refresh");
     lv_refr_now(disp);
     epd_lvgl_refresh(disp);
 
-	
     printf("Going to deep sleep. Next pos\n");
-	fflush(stdout);
-	vTaskDelay(pdMS_TO_TICKS(100));
+	ESP_LOGI(TAG, "Going to deep sleep");
 	
 	// Deep sleep
-    epd_sleep(epd);                     // Перевести дисплей в сон (полезно для low-power)
+    epd_sleep(epd);
 	vTaskDelay(pdMS_TO_TICKS(20));
-    time_t before_sleep;
-    time(&before_sleep);
-    rtc_epoch_at_sleep = before_sleep;
     esp_sleep_enable_timer_wakeup(WAKE_PERIOD_US);
     esp_deep_sleep_start();
 }
