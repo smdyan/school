@@ -8,9 +8,10 @@ if TYPE_CHECKING:
 
 
 class LessonBase( SQLModel ):
+    dayNum:int
     lessonNum: int
-    subjectId: int | None = Field(default=None, foreign_key="subject.id")
     weekdayId: int | None = Field(default=None, foreign_key="weekday.id")
+    subjectId: int | None = Field(default=None, foreign_key="subject.id")
 
 
 class Lesson( LessonBase, table=True ):
@@ -20,7 +21,7 @@ class Lesson( LessonBase, table=True ):
 
 
 class LessonCreate( LessonBase ):
-    pass
+    subjectName: str
 
 
 class LessonPublic( LessonBase ):

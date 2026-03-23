@@ -2,7 +2,7 @@
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from src.routes.schedule import router
+from src.router import get_router
 from src.data.init import create_db_and_tables
 
 
@@ -14,7 +14,7 @@ async def Lifespan(app: FastAPI):
 
 
 app = FastAPI( lifespan=Lifespan )
-app.include_router( router )
+app.include_router( get_router() )
 
 origins = ["*"]
 app.add_middleware(

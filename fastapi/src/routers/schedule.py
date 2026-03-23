@@ -17,11 +17,11 @@ def push2db( session: SessionDep ):
     if wd1:
         raise HTTPException(status_code=404, detail="data set already")
     createWeekdays( session )
-    createSubjects ( session )
+    # createSubjects ( session )
     return True
 
 
-@router.post( "/lesson", response_model=LessonPublic )
+@router.post( "/lessons", response_model=LessonPublic )
 def addLesson( lesson: LessonCreate, session: SessionDep ):
     dbLesson = Lesson.model_validate( lesson )
     wd = session.get( Weekday,  lesson.weekdayId )
@@ -32,7 +32,7 @@ def addLesson( lesson: LessonCreate, session: SessionDep ):
     return dbLesson
 
 
-@router.delete("/lesson/{id}")
+@router.delete("/lessons/{id}")
 async def deleteLesson(id: int, session: SessionDep):
     lesson = session.get(Lesson, id)
     if not lesson:
@@ -42,7 +42,7 @@ async def deleteLesson(id: int, session: SessionDep):
     return {"ok": True}
 
 
-@router.get("/lesson/{id}", response_model=LessonPublic)
+@router.get("/lessons/{id}", response_model=LessonPublic)
 async def getLesson(id: int, session: SessionDep):
     lesson = session.get(Lesson, id)
     if not lesson:
