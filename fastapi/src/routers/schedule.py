@@ -6,19 +6,9 @@ from src.model.lesson import Lesson, LessonCreate, LessonPublic
 from src.model.weekday import Weekday
 from src.model.subject import Subject
 from src.model.schedule import Schedule
-from src.fake.schedule import createWeekdays, createSubjects
 
 
 router = APIRouter( prefix="/school" )
-
-@router.get("/init")
-def push2db( session: SessionDep ):
-    wd1 = session.get( Weekday, 1)
-    if wd1:
-        raise HTTPException(status_code=404, detail="data set already")
-    createWeekdays( session )
-    # createSubjects ( session )
-    return True
 
 
 @router.post( "/lessons", response_model=LessonPublic )

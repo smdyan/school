@@ -1,18 +1,100 @@
 from fastapi import HTTPException, APIRouter
 from pathlib import Path
 from pydantic import ValidationError
+from sqlmodel import select
 from csv import DictReader
 from src.data.init import SessionDep
 from src.model.subject import Subject, SubjectCreate
 from src.model.lesson import Lesson, LessonCreate
+from src.model.weekday import Weekday, WeekdayCreate
 
 
 router = APIRouter( prefix="/school", tags=["school"] )
 
-SUBJ_CSV_PATH = Path("/Users/lily/school/fastapi/src/assets/subjects.csv") 
-LESSON_CSV_PATH = Path("/Users/lily/school/fastapi/src/assets/lessons.csv") 
+WEEKDAYS_CSV_PATH = Path("/Users/lily/school/fastapi/src/assets/weekdays.csv") 
+LESSONS_CSV_PATH = Path("/Users/lily/school/fastapi/src/assets/lessons.csv") 
 
-async def import_from_csv(path: Path, create_model, db_model, session: SessionDep):
+async def _get_or_create_subject_id(session, subjectName: str) -> int:
+    name = subjectName.strip()
+    res = session.execute(select(Subject).where(Subject.name == name))
+    obj = res.scalar_one_or_none()
+    if obj:
+        return obj.id
+
+    obj = Subject(name=name)
+    session.add(obj)
+    session.flush()
+    return obj.id
+
+async def _get_weekday_id(session, dayNum: int) -> int:
+    res = session.execute(select(Weekday).where(Weekday.dayNum == dayNum))
+    obj = res.scalar_one_or_none()
+    return obj.id
+
+
+async def import_lessons_from_csv(path: Path, session):
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Default CSV file not found")
+
+    created = 0
+    errors: list[dict] = []
+
+    subject_cache: dict[str, int] = {}
+    weekday_cache: dict[int, int] = {}
+
+    with path.open("r", encoding="utf-8") as f:
+        reader = DictReader(f)
+
+        for line_no, row in enumerate(reader, start=2):
+            try:
+                obj_in = LessonCreate.model_validate(row)
+            except ValidationError as e:
+                errors.append({"line": line_no, "row": row, "errors": e.errors()})
+                continue
+
+            data = obj_in.model_dump()
+
+            # 1) берём name, удаляем его из данных
+            subjectName = (data.pop("subjectName", "") or "").strip()
+            if not subjectName:
+                errors.append({"line": line_no, "row": row, "errors": [{"msg": "subjectName is empty"}]})
+                continue
+
+            # 2) получаем name_id через БД (с кэшем)
+            if subjectName in subject_cache:
+                subjectId = subject_cache[subjectName]
+            else:
+                subjectId = await _get_or_create_subject_id(session, subjectName)
+                subject_cache[subjectName] = subjectId
+
+            # 3) подставляем name_id и создаём ORM объект
+            data["subjectId"] = subjectId
+            
+            
+            dayNum = data.pop("dayNum")
+            if not dayNum:
+                errors.append({"line": line_no, "row": row, "errors": [{"msg": "dayNum is empty"}]})
+                continue
+
+            # 2) получаем name_id через БД (с кэшем)
+            if dayNum in weekday_cache:
+                weekdayId = weekday_cache[dayNum]
+            else:
+                weekdayId = await _get_weekday_id(session, dayNum)
+                weekday_cache[dayNum] = weekdayId
+
+            # 3) подставляем name_id и создаём ORM объект
+            data["weekdayId"] = weekdayId
+            
+            obj = Lesson(**data)
+
+            session.add(obj)
+            created += 1
+
+    return created, errors
+
+
+async def import_weekdays_from_csv(path: Path, session: SessionDep):
     
     if not path.exists():
         raise HTTPException(status_code=404, detail="Default CSV file not found")
@@ -25,7 +107,7 @@ async def import_from_csv(path: Path, create_model, db_model, session: SessionDe
 
         for line_no, row in enumerate(reader, start=2):  # start=2: первая строка — заголовки
             try:
-                obj_in = create_model.model_validate(row)
+                obj_in = WeekdayCreate.model_validate(row)
 
             except ValidationError as e:
                 errors.append(
@@ -37,49 +119,38 @@ async def import_from_csv(path: Path, create_model, db_model, session: SessionDe
                 )
                 continue
 
-            obj = db_model(**obj_in.model_dump())
+            obj = Weekday(**obj_in.model_dump())
             session.add(obj)
             created += 1
 
     return created, errors
 
+
+
 @router.post("/import-data")
 async def import_refs(session: SessionDep):
     
-    subj_created, subj_errors = await import_from_csv(
-        path=SUBJ_CSV_PATH,
-        create_model=SubjectCreate,
-        db_model=Subject,
+    weekdays_created, weekdays_errors = await import_weekdays_from_csv(
+        path=WEEKDAYS_CSV_PATH,
         session=session,
     )
-
-    lesson_created, lesson_errors = await import_from_csv(
-        path=LESSON_CSV_PATH,
-        create_model=LessonCreate,
-        db_model=Lesson,
-        session=session,
-    )
-
-    # bank_created, bank_errors = await import_from_csv(
-    #     path=BANK_CSV_PATH,
-    #     create_model=BankCreate,
-    #     db_model=Bank,
-    #     session=session,
-    # )
-
     session.commit()
+
+    lesson_created, lesson_errors = await import_lessons_from_csv(
+        path=LESSONS_CSV_PATH,
+        session=session,
+    )
+    session.commit()
+    
     return {
         "status": "ok",
-        "customers": {
-            "created": subj_created,
-            "errors": subj_errors,
+        "weekdays": {
+            "created": weekdays_created,
+            "errors": weekdays_errors,
         },
-        "currency": {
+        "lessons": {
             "created": lesson_created,
             "errors": lesson_errors,
         },
-        # "bank": {
-        #     "created": bank_created,
-        #     "errors": bank_errors,
-        # },
+
     }
