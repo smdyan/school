@@ -70,20 +70,18 @@ async def import_lessons_from_csv(path: Path, session):
             # 3) подставляем name_id и создаём ORM объект
             data["subjectId"] = subjectId
             
-            
+            # тоже для weekdayId
             dayNum = data.pop("dayNum")
             if not dayNum:
                 errors.append({"line": line_no, "row": row, "errors": [{"msg": "dayNum is empty"}]})
                 continue
 
-            # 2) получаем name_id через БД (с кэшем)
             if dayNum in weekday_cache:
                 weekdayId = weekday_cache[dayNum]
             else:
                 weekdayId = await _get_weekday_id(session, dayNum)
                 weekday_cache[dayNum] = weekdayId
 
-            # 3) подставляем name_id и создаём ORM объект
             data["weekdayId"] = weekdayId
             
             obj = Lesson(**data)

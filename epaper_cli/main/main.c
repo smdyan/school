@@ -344,11 +344,7 @@ void app_main(void) {
         }
         static char schedule_url[128];
         
-        int week_day = tm.tm_wday;
-        if( week_day == 0) {
-            week_day = 7;
-        }
-        snprintf(schedule_url, sizeof(schedule_url), API_URL "%d", week_day);
+        snprintf(schedule_url, sizeof(schedule_url), API_URL "%d", tm.tm_wday);
         if (http_get_to_buffer(schedule_url, http_buf, sizeof(http_buf)) == ESP_OK) {
             ESP_LOGI(TAG, "api read");
             vTaskDelay(pdMS_TO_TICKS(500));
