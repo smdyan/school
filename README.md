@@ -9,9 +9,11 @@ The backend is a **FastAPI** service with a **SQLite** database. It provides:
 - **POST** endpoint(s) to import lesson schedules from a CSV file
 - **GET** endpoint(s) to retrieve the schedule by **weekday number**
 
+For easier and reproducible deployment, the backend can be run in **Docker**.
+
 ## Tech Stack
 - **ESP-IDF** (ESP32-C6), Wi-Fi, deep sleep
 - **E-paper display** + LVGL
-- **FastAPI** backend
+- **FastAPI** backend (Docker-ready)
 - **SQLite** storage
 - **CSV** import
