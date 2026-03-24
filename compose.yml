@@ -9,7 +9,7 @@ services:
       dockerfile: Dockerfile_fastapi
 
     volumes:
-      - ./database:/fastapi/database
+      - ./database:/fastapi/database          # HOST_PATH:CONTAINER_PATH
 
     ports:
       - "8080:80"   # на хосте 8080 → в контейнере 80

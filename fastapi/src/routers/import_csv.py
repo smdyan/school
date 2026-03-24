@@ -11,8 +11,8 @@ from src.model.weekday import Weekday, WeekdayCreate
 
 router = APIRouter( prefix="/school", tags=["school"] )
 
-WEEKDAYS_CSV_PATH = Path("/Users/lily/school/fastapi/src/assets/weekdays.csv") 
-LESSONS_CSV_PATH = Path("/Users/lily/school/fastapi/src/assets/lessons.csv") 
+WEEKDAYS_CSV_PATH = Path("./src/assets/weekdays.csv") 
+LESSONS_CSV_PATH = Path("./src/assets/lessons.csv") 
 
 async def _get_or_create_subject_id(session, subjectName: str) -> int:
     name = subjectName.strip()
