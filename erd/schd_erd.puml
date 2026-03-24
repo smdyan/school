@@ -18,8 +18,8 @@ object Lessons {
     *id: PK
     *lessonNum
     subjectId: FK
-    subject
     weekdayId: FK
+    subject
     weekday
 }
 

@@ -14,25 +14,4 @@ services:
     ports:
       - "8080:80"   # на хосте 8080 → в контейнере 80
 
-    # networks:
-    #   mynet:
-    #     ipv4_address: 172.24.0.15
-
     restart: always
-  
-#   cli:
-#     container_name: school_vue
-#     build:
-#       context: ./vue
-#       dockerfile: Dockerfile_vue
-#     profiles:
-#       - cli
-#     networks:
-#       mynet:
-#         ipv4_address: 172.24.0.16
-#     restart: always
-
-# networks:
-#   mynet:
-#     name: twg4_mynet
-#     external: true

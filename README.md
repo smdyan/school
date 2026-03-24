@@ -1,12 +1,17 @@
-# school
+# School Schedule IoT — ESP32-C6 E-Paper Client + FastAPI Backend
 
-start backend server localy:
-    fastapi run main.py
+A low-power e-paper IoT gadget that shows today’s school lesson schedule.  
+Built on **ESP32-C6** (ESP-IDF) and using **deep sleep**, it reaches very low power consumption (~**200 µA**).
 
+The client wakes up periodically, connects to Wi-Fi, fetches the schedule from the backend, renders it on the e-paper display, and goes back to sleep.
 
-*** ERD
-1. Execute the File: Process the aforementioned text file: java -jar plantuml.jar erd.puml
-2. Alternative: Launch the Graphical User Interface and select the directory that contains the text files: java -jar plantuml.jar -gui
+The backend is a **FastAPI** service with a **SQLite** database. It provides:
+- **POST** endpoint(s) to import lesson schedules from a CSV file
+- **GET** endpoint(s) to retrieve the schedule by **weekday number**
 
-***
-uvicorn main:app --reload
+## Tech Stack
+- **ESP-IDF** (ESP32-C6), Wi-Fi, deep sleep
+- **E-paper display** + LVGL
+- **FastAPI** backend
+- **SQLite** storage
+- **CSV** import
